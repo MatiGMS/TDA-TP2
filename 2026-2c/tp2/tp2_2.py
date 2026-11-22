@@ -7,6 +7,9 @@ plataformas_global = []
 servidores_global = []
 banda_servidor_global = []
 servidor_plataforma_global = []
+flujo_actual_global = 0
+
+
 
 def bfs(g, s, t, parent):
     vis = set([s])
@@ -21,6 +24,8 @@ def bfs(g, s, t, parent):
                 if v == t:
                     return True
     return False
+
+
 
 def ejecutar_ff(g, s, t):
     parent = {}
@@ -41,53 +46,103 @@ def ejecutar_ff(g, s, t):
         f_max += path_flow
     return f_max
 
-def calcular_asignacion(g, bandas, plataformas, banda_servidor, servidor_plataforma, servidores):
-    flujo_entrada = {}
-    for b, s_id in banda_servidor:
-        val = g[s_id + '_in'].get(b, 0)
-        if val > 0:
-            if b not in flujo_entrada: flujo_entrada[b] = {}
-            flujo_entrada[b][s_id] = val
 
-    flujo_salida = {}
-    for s_id, p in servidor_plataforma:
-        val = g[p].get(s_id + '_out', 0)
-        if val > 0:
-            if s_id not in flujo_salida: flujo_salida[s_id] = {}
-            flujo_salida[s_id][p] = val
 
-    servidor_entrada_total = {}
-    for b in flujo_entrada:
-        for s_id, v in flujo_entrada[b].items():
-            servidor_entrada_total[s_id] = servidor_entrada_total.get(s_id, 0) + v
 
-    servidor_salida_total = {}
-    for s_id in flujo_salida:
-        servidor_salida_total[s_id] = sum(flujo_salida[s_id].values())
+def calcular_asignacion(g, servidores):
+    asignaciones_totales = {}
 
-    flujos_pares = {}
-    for s_id in flujo_salida:
-        total_entrada = servidor_entrada_total.get(s_id, 0)
-        total_salida = servidor_salida_total.get(s_id, 0)
-        if total_entrada == 0 or total_salida == 0:
-            continue
-        for b in flujo_entrada:
-            if s_id in flujo_entrada[b]:
-                valor_entrada = flujo_entrada[b][s_id]
-                for p, valor_salida in flujo_salida[s_id].items():
-                    fraccion = (valor_entrada * valor_salida) / total_entrada
-                    clave = (b, p)
-                    flujos_pares[clave] = flujos_pares.get(clave, 0) + fraccion
+    for s_id, _ in servidores:
+        in_node = s_id + '_in'
+        out_node = s_id + '_out'
 
-    asignacion = []
-    for (b, p), cant in flujos_pares.items():
-        c_int = round(cant)
-        if c_int > 0:
-            asignacion.append((b, p, c_int))
-    return asignacion
+        entradas = []
+        for nodo, flujo in g[in_node].items():
+            if nodo != out_node and flujo > 0:
+                entradas.append([nodo, flujo])
+
+        salidas = []
+        for nodo in g[out_node]:
+            if nodo != in_node:
+                flujo = g[nodo].get(out_node, 0)
+                if flujo > 0:
+                    salidas.append([nodo, flujo])
+
+        i, j = 0, 0
+        while i < len(entradas) and j < len(salidas):
+            b, flujo_in = entradas[i]
+            p, flujo_out = salidas[j]
+
+            cant = min(flujo_in, flujo_out)
+            asignaciones_totales[(b, p)] = asignaciones_totales.get((b, p), 0) + cant
+
+            entradas[i][1] -= cant
+            salidas[j][1] -= cant
+
+            if entradas[i][1] == 0:
+                i += 1
+            if salidas[j][1] == 0:
+                j += 1
+
+    return [(b, p, cant) for (b, p), cant in asignaciones_totales.items() if cant > 0]
+
+
+
+def devolver_flujo(g, origen, destino, cantidad):
+    restante = cantidad
+    parent = {}
+    while restante > 0 and bfs(g, origen, destino, parent):
+        cuello = restante
+        v = destino
+        while v != origen:
+            u = parent[v]
+            cuello = min(cuello, g[u][v])
+            v = u
+
+        v = destino
+        while v != origen:
+            u = parent[v]
+            g[u][v] -= cuello
+            g[v][u] += cuello
+            v = u
+
+        restante -= cuello
+        parent = {}
+
+
+
+def reducir_flujo_residual(g, in_node, out_node, exceso):
+    devolver_flujo(g, in_node, 's', exceso)
+    devolver_flujo(g, 't', out_node, exceso)
+
+
+
+def actualizar_servidor(id_servidor, nueva_capacidad):
+    global grafo_global, total_esp_global, servidores_global, flujo_actual_global
+    g = grafo_global
+    in_node = id_servidor + '_in'
+    out_node = id_servidor + '_out'
+
+    flujo_usado = g[out_node][in_node]
+
+    if nueva_capacidad >= flujo_usado:
+        g[in_node][out_node] = nueva_capacidad - flujo_usado
+    else:
+        exceso = flujo_usado - nueva_capacidad
+        g[out_node][in_node] = nueva_capacidad
+        g[in_node][out_node] = 0
+        reducir_flujo_residual(g, in_node, out_node, exceso)
+        flujo_actual_global -= exceso
+
+    flujo_actual_global += ejecutar_ff(g, 's', 't')
+    posible = (flujo_actual_global == total_esp_global)
+    asignacion = calcular_asignacion(g, servidores_global)
+    return (posible, flujo_actual_global, asignacion)
+
+
 
 def main(bandas, servidores, plataformas, banda_servidor, servidor_plataforma):
-    global grafo_global, total_esp_global, bandas_global, plataformas_global, servidores_global, banda_servidor_global, servidor_plataforma_global
+    global grafo_global, total_esp_global, flujo_actual_global, bandas_global, plataformas_global, servidores_global, banda_servidor_global, servidor_plataforma_global
     bandas_global = bandas
     servidores_global = servidores
     plataformas_global = plataformas
@@ -121,24 +176,7 @@ def main(bandas, servidores, plataformas, banda_servidor, servidor_plataforma):
 
     grafo_global = g
     f_max = ejecutar_ff(g, 's', 't')
+    flujo_actual_global = f_max
     posible = (f_max == total_esp)
-    asignacion = calcular_asignacion(g, bandas, plataformas, banda_servidor, servidor_plataforma, servidores)
-    return (posible, f_max, asignacion)
-
-def actualizar_servidor(id_servidor, nueva_capacidad):
-    global grafo_global, total_esp_global, bandas_global, plataformas_global, servidores_global, banda_servidor_global, servidor_plataforma_global
-    in_node = id_servidor + '_in'
-    out_node = id_servidor + '_out'
-    g = grafo_global
-    
-    current_cap = g[in_node][out_node] + g[out_node][in_node]
-    diff = nueva_capacidad - current_cap
-    g[in_node][out_node] += diff
-    if g[in_node][out_node] < 0:
-        g[in_node][out_node] = 0
-        g[out_node][in_node] = nueva_capacidad
-
-    f_max = ejecutar_ff(g, 's', 't')
-    posible = (f_max == total_esp_global)
-    asignacion = calcular_asignacion(g, bandas_global, plataformas_global, banda_servidor_global, servidor_plataforma_global, servidores_global)
+    asignacion = calcular_asignacion(g, servidores_global)
     return (posible, f_max, asignacion)
