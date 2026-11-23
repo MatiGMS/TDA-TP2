@@ -124,8 +124,12 @@ def actualizar_servidor(id_servidor, nueva_capacidad):
     out_node = id_servidor + '_out'
 
     flujo_usado = g[out_node][in_node]
+    cap_actual = g[in_node][out_node] + flujo_usado
 
-    if nueva_capacidad >= flujo_usado:
+    if nueva_capacidad > cap_actual:
+        g[in_node][out_node] = nueva_capacidad - flujo_usado
+        flujo_actual_global += ejecutar_ff(g, 's', 't')
+    elif nueva_capacidad >= flujo_usado:
         g[in_node][out_node] = nueva_capacidad - flujo_usado
     else:
         exceso = flujo_usado - nueva_capacidad
@@ -133,8 +137,8 @@ def actualizar_servidor(id_servidor, nueva_capacidad):
         g[in_node][out_node] = 0
         reducir_flujo_residual(g, in_node, out_node, exceso)
         flujo_actual_global -= exceso
+        flujo_actual_global += ejecutar_ff(g, 's', 't')
 
-    flujo_actual_global += ejecutar_ff(g, 's', 't')
     posible = (flujo_actual_global == total_esp_global)
     asignacion = calcular_asignacion(g, servidores_global)
     return (posible, flujo_actual_global, asignacion)
@@ -149,7 +153,7 @@ def main(bandas, servidores, plataformas, banda_servidor, servidor_plataforma):
     banda_servidor_global = banda_servidor
     servidor_plataforma_global = servidor_plataforma
 
-    g = {}
+    g = {'s': {}, 't': {}}
     def add_edge(u, v, c):
         if u not in g: g[u] = {}
         if v not in g: g[v] = {}
